@@ -1,0 +1,5 @@
+Flask
+google-auth-oauthlib
+requests-oauthlib
+itsdangerous
+gunicorn
