@@ -19,7 +19,7 @@ SCOPES = [
 
 serializer = URLSafeSerializer(SIGNING_SECRET, salt="oauth-return")
 
-def make_flow():
+def make_flow(code_verifier=None):
     return Flow.from_client_config(
         {
             "web": {
@@ -31,7 +31,8 @@ def make_flow():
         },
         scopes=SCOPES,
         redirect_uri=REDIRECT_URI,
-        autogenerate_code_verifier=True,
+        code_verifier=code_verifier,
+        autogenerate_code_verifier=(code_verifier is None),
     )
 
 oauth_store = {}
@@ -46,7 +47,6 @@ def start():
     )
 
     oauth_store[state] = flow.code_verifier
-
     return redirect(auth_url)
 
 @app.route("/auth/callback")
@@ -55,25 +55,13 @@ def callback():
     state = request.args.get("state")
 
     if state not in oauth_store:
-        return "State expired. Try again."
+        return "Session expired. Please try again."
 
     code_verifier = oauth_store.pop(state)
 
-    flow = Flow.from_client_config(
-        {
-            "web": {
-                "client_id": CLIENT_ID,
-                "client_secret": CLIENT_SECRET,
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
-            }
-        },
-        scopes=SCOPES,
-        redirect_uri=REDIRECT_URI,
-        code_verifier=code_verifier,
-    )
-
+    flow = make_flow(code_verifier)
     flow.fetch_token(code=code)
+
     creds = flow.credentials
 
     payload = {
