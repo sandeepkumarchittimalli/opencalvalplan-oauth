@@ -8,7 +8,10 @@ app = Flask(__name__)
 CLIENT_ID = os.environ["GOOGLE_CLIENT_ID"]
 CLIENT_SECRET = os.environ["GOOGLE_CLIENT_SECRET"]
 REDIRECT_URI = os.environ["GOOGLE_REDIRECT_URI"]
-STREAMLIT_RETURN_URL = os.environ["STREAMLIT_RETURN_URL"]
+
+# Production Streamlit app fallback
+STREAMLIT_RETURN_URL = os.environ["STREAMLIT_RETURN_URL"].rstrip("/")
+
 SIGNING_SECRET = os.environ["SIGNING_SECRET"]
 
 SCOPES = [
@@ -18,6 +21,13 @@ SCOPES = [
 ]
 
 serializer = URLSafeSerializer(SIGNING_SECRET, salt="oauth-return")
+
+# Allowed Streamlit destinations
+ALLOWED_RETURN_URLS = {
+    STREAMLIT_RETURN_URL,
+    "https://opencalvalapp-rfx3ahcnscaas7m6guvpmm.streamlit.app",
+}
+
 
 def make_flow(code_verifier=None):
     return Flow.from_client_config(
@@ -35,19 +45,35 @@ def make_flow(code_verifier=None):
         autogenerate_code_verifier=(code_verifier is None),
     )
 
+
 oauth_store = {}
+
 
 @app.route("/auth/start")
 def start():
+    return_to = request.args.get(
+        "return_to",
+        STREAMLIT_RETURN_URL
+    ).rstrip("/")
+
+    if return_to not in ALLOWED_RETURN_URLS:
+        return "Invalid return URL.", 400
+
     flow = make_flow()
+
     auth_url, state = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
         prompt="consent",
     )
 
-    oauth_store[state] = flow.code_verifier
+    oauth_store[state] = {
+        "code_verifier": flow.code_verifier,
+        "return_to": return_to,
+    }
+
     return redirect(auth_url)
+
 
 @app.route("/auth/callback")
 def callback():
@@ -57,7 +83,10 @@ def callback():
     if state not in oauth_store:
         return "Session expired. Please try again."
 
-    code_verifier = oauth_store.pop(state)
+    session = oauth_store.pop(state)
+
+    code_verifier = session["code_verifier"]
+    return_to = session["return_to"]
 
     flow = make_flow(code_verifier)
     flow.fetch_token(code=code)
@@ -75,4 +104,6 @@ def callback():
 
     signed = serializer.dumps(payload)
 
-    return redirect(f"{STREAMLIT_RETURN_URL}?oauth_return={signed}")
+    return redirect(
+        f"{return_to}/?oauth_return={signed}"
+    )
